@@ -1,0 +1,45 @@
+# 作者：zcy
+# RentAI 部署编排：PostgreSQL(pgvector) + Redis + 后端(后端镜像)；前端待搭建后追加
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    platform: linux/amd64
+    container_name: rentai-postgres
+    environment:
+      POSTGRES_USER: rent
+      POSTGRES_PASSWORD: rent
+      POSTGRES_DB: rentai
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rent"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: rentai-redis
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: ./backend
+    container_name: rentai-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://rent:rent@postgres:5432/rentai
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:

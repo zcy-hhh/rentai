@@ -1,0 +1,52 @@
+/* 作者：zcy */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  background-color: #f4f6fb;
+  background-image:
+    radial-gradient(1200px 500px at 20% -10%, rgba(47, 125, 224, 0.08), transparent),
+    radial-gradient(1000px 400px at 90% 0%, rgba(217, 70, 239, 0.05), transparent);
+  background-attachment: fixed;
+}
+
+/* 骨架屏流光 */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: #eef1f6;
+  border-radius: 8px;
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.7), transparent);
+  animation: shimmer 1.2s infinite;
+}
+
+/* 卡片 hover 抬升 */
+.card-hover {
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.card-hover:hover {
+  box-shadow: 0 8px 20px rgba(16, 24, 40, 0.10);
+  transform: translateY(-1px);
+}
+
+/* 细滚动条 */
+*::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 8px;
+}

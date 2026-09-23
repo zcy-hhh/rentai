@@ -1,0 +1,60 @@
+[project]
+name = "rentai-backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "zcy", email = "xinna777@qq.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.20.0",
+    "asyncpg>=0.31.0",
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
+    "langchain>=1.4.2",
+    "langchain-community>=0.3,<0.4",
+    "langchain-openai>=1.6.2",
+    "langgraph>=1.2.11",
+    "mcp<2",
+    "minio>=7.2.20",
+    "openai>=3.16.2",
+    "openpyxl>=3.1.5",
+    "pgvector>=0.5.0",
+    "psycopg2-binary>=2.9.13",
+    "pydantic>=2.13.5",
+    "pydantic-settings>=2.15.0",
+    "pyjwt>=2.14.0",
+    "pymupdf>=1.28.2",
+    "python-dotenv>=1.2.3",
+    "python-pptx>=1.0.2",
+    "ragas>=0.2.7,<0.3",
+    "redis>=8.1.0",
+    "sqlalchemy>=2.0.54",
+    "uvicorn[standard]>=0.53.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.7,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.uv]
+package = false
+
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple/"
+default = true
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+# async 测试共享 session 级 event loop：
+# SessionLocal 的 async engine 连接池绑定首个使用它的 loop，多 loop 复用会
+# 跨 loop 使用 asyncpg 连接导致 proactor 崩溃（Windows），故统一为一个 loop。
+asyncio_default_test_loop_scope = "session"

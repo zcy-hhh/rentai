@@ -1,0 +1,7 @@
+﻿{
+  "match_cases": 6,
+  "match_precision@k": 1.0,
+  "match_recall": 1.0,
+  "risk_cases": 2,
+  "risk_recall": 1.0
+}

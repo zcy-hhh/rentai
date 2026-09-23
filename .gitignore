@@ -1,0 +1,31 @@
+# 环境与密钥（切勿提交）
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.uv/
+.pytest_cache/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+
+# 临时/演示
+demo_*.txt
+pytest_summary.txt
+smoke.txt
+
+# 系统
+Thumbs.db
+.DS_Store
+
+# 面试留档（本地保留，不上传仓库；仓库文档只保留 README + docs/部署文档.md）
+docs/需求分析.md
+docs/设计映射.md
+docs/开发记录.md
+docs/开发文档.md

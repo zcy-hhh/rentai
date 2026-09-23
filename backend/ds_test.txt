@@ -1,0 +1,2 @@
+﻿chat OK: 'Hello! How can I'
+embedding OK, dim=1024

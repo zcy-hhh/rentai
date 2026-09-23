@@ -1,0 +1,106 @@
+{
+  "cases": [
+    {
+      "name": "梁溪·1室·预算3k",
+      "truth_n": 4,
+      "returned": 20,
+      "recall@1": 0.0,
+      "precision@1": 0.0,
+      "recall@3": 0.0,
+      "precision@3": 0.0,
+      "recall@5": 0.0,
+      "precision@5": 0.0,
+      "recall@10": 0.0,
+      "precision@10": 0.0,
+      "recall@20": 0.5,
+      "precision@20": 0.1
+    },
+    {
+      "name": "滨湖·2室·预算5k",
+      "truth_n": 11,
+      "returned": 20,
+      "recall@1": 0.0,
+      "precision@1": 0.0,
+      "recall@3": 0.0,
+      "precision@3": 0.0,
+      "recall@5": 0.091,
+      "precision@5": 0.2,
+      "recall@10": 0.182,
+      "precision@10": 0.2,
+      "recall@20": 0.545,
+      "precision@20": 0.3
+    },
+    {
+      "name": "新吴·1室·预算2.5k",
+      "truth_n": 9,
+      "returned": 20,
+      "recall@1": 0.0,
+      "precision@1": 0.0,
+      "recall@3": 0.111,
+      "precision@3": 0.333,
+      "recall@5": 0.222,
+      "precision@5": 0.4,
+      "recall@10": 0.444,
+      "precision@10": 0.4,
+      "recall@20": 0.667,
+      "precision@20": 0.3
+    },
+    {
+      "name": "锡山·3室·预算6k",
+      "truth_n": 10,
+      "returned": 20,
+      "recall@1": 0.0,
+      "precision@1": 0.0,
+      "recall@3": 0.1,
+      "precision@3": 0.333,
+      "recall@5": 0.1,
+      "precision@5": 0.2,
+      "recall@10": 0.2,
+      "precision@10": 0.2,
+      "recall@20": 0.3,
+      "precision@20": 0.15
+    },
+    {
+      "name": "惠山·2室·预算3.5k",
+      "truth_n": 10,
+      "returned": 20,
+      "recall@1": 0.0,
+      "precision@1": 0.0,
+      "recall@3": 0.0,
+      "precision@3": 0.0,
+      "recall@5": 0.1,
+      "precision@5": 0.2,
+      "recall@10": 0.4,
+      "precision@10": 0.4,
+      "recall@20": 0.7,
+      "precision@20": 0.35
+    }
+  ],
+  "curve": [
+    {
+      "k": 1,
+      "avg_recall": 0.0,
+      "avg_precision": 0.0
+    },
+    {
+      "k": 3,
+      "avg_recall": 0.042,
+      "avg_precision": 0.133
+    },
+    {
+      "k": 5,
+      "avg_recall": 0.103,
+      "avg_precision": 0.2
+    },
+    {
+      "k": 10,
+      "avg_recall": 0.245,
+      "avg_precision": 0.24
+    },
+    {
+      "k": 20,
+      "avg_recall": 0.542,
+      "avg_precision": 0.24
+    }
+  ]
+}
