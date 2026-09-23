@@ -235,7 +235,7 @@ async def chat_step(uid: str, session_id: str, user_msg: str, history: list | No
         if mode == "workflow":
             state = await rent_graph.ainvoke({"requirement": req})
             viewing = state.get("viewing_list")
-            trace = [{"tool": t, "thought": ""} for t in ["retrieve", "filter", "rank", "risk_check", "build_list"]]
+            trace = [{"tool": t, "thought": ""} for t in ["search_listings", "filter_hard", "score_rank", "check_risks", "build_viewing_list"]]
             reflexion = []
         else:
             trace, viewing, reflexion = await run_with_reflexion(req)

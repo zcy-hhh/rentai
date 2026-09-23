@@ -168,11 +168,12 @@ export async function apiChat(
   message: string,
   sessionId: string,
   history: [string, string][] = [],
+  userId: string = "demo",
 ): Promise<ChatStepResult> {
   const res = await fetch(`${BASE}/rent/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, session_id: sessionId, history }),
+    body: JSON.stringify({ message, session_id: sessionId, history, user_id: userId }),
   });
   if (!res.ok) {
     const e = await res.json().catch(() => ({}));

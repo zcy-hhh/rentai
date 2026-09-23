@@ -19,6 +19,7 @@ dist/
 demo_*.txt
 pytest_summary.txt
 smoke.txt
+*.log
 
 # 系统
 Thumbs.db

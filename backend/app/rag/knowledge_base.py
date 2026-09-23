@@ -99,18 +99,44 @@ def _extract_searchable_text(listing: Listing) -> str:
 
 
 def check_listing(listing: Listing, district_avg_price: float | None = None) -> list[RiskNote]:
-    """对一个房源跑全部风险规则，返回命中的风险标注（带引用）。"""
+    """对一个房源跑全部风险规则，返回命中的风险标注（带引用）。
+
+    检测分两层：
+    1. 结构化字段检测（朝向、电梯、楼层、价格异常、面积户型比）—— 基于房源真实字段
+    2. 关键词检测（description/risk_flags 中的风险词）
+    """
     text = _extract_searchable_text(listing)
     notes: list[RiskNote] = []
+    has_elevator = "电梯" in listing.facilities
+    is_near_metro = "近地铁" in listing.facilities
+
     for rule in RISK_RULES:
         hit = False
-        # 结构化字段关键词命中
-        if any(kw in text for kw in rule.keywords):
+
+        # ---- 结构化字段检测 ----
+        if rule.kind == "朝向采光" and listing.orientation in ("北", "朝北", "西北", "东北"):
             hit = True
-        # 疑似虚假：价格异常 + 未验证
-        if rule.max_price_ratio is not None and district_avg_price:
+        if rule.kind == "无电梯高楼层" and not has_elevator:
+            # 无电梯即提示（高楼层更严重，但无电梯本身就是不便）
+            hit = True
+        if rule.kind == "通勤偏远" and not is_near_metro:
+            hit = True
+        if rule.kind == "疑似群租":
+            # 面积小但户型房间多 → 疑似隔断/群租
+            try:
+                room_num = int(listing.room_type.replace("室", "").replace("厅", "").strip() or "0")
+            except (ValueError, AttributeError):
+                room_num = 0
+            if room_num >= 2 and listing.area and listing.area < 40:
+                hit = True
+        if rule.kind == "疑似虚假房源" and rule.max_price_ratio is not None and district_avg_price:
             if not listing.is_verified and listing.price < district_avg_price * rule.max_price_ratio:
                 hit = True
+
+        # ---- 关键词检测（兜底） ----
+        if not hit and any(kw in text for kw in rule.keywords):
+            hit = True
+
         if hit:
             notes.append(
                 RiskNote(

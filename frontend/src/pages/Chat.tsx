@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { apiChat, apiSaveViewing } from "../api";
 import { AGENT_TOOL_LABELS, type CandidateListing, type ChatStepResult } from "../types";
+import { useAuth } from "../store/auth";
 
 interface Msg {
   role: "user" | "assistant";
@@ -107,6 +108,7 @@ function EscalationCard({ esc }: { esc: { reason: string[]; context: string; adv
 
 export default function Chat() {
   const SESSION_KEY = "rentai-chat-session";
+  const username = useAuth((s) => s.username) ?? "demo";
   // 会话持久化：sessionId 与消息写入 localStorage，返回页面/刷新/跳转后自动恢复（同一 session 后端多轮继续）
   const [sessionId, setSessionId] = useState<string>(
     () => localStorage.getItem(SESSION_KEY) ?? `chat-${Date.now()}`,
@@ -143,7 +145,7 @@ export default function Chat() {
     try {
       // 前端本地保存了完整历史（localStorage），作为上下文真相源传给后端（后端 Redis 记忆可能过期）
       const hist = msgs.filter((m) => m.text).map((m) => [m.role, m.text] as [string, string]);
-      const r: ChatStepResult = await apiChat(msg, sessionId, hist);
+      const r: ChatStepResult = await apiChat(msg, sessionId, hist, username);
       setMsgs((m) => [
         ...m,
         {
