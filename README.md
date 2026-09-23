@@ -32,26 +32,7 @@
 
 ## 🏗️ 架构总览
 
-```mermaid
-flowchart TB
-    subgraph FE["React 前端"]
-        UI["智能搜索 · 对话 · 看房清单 · 知识库 · 观测台"]
-    end
-    subgraph BE["FastAPI 后端"]
-        API["REST + SSE"]
-        CORE["Agent 编排"]
-        OPS["Harness 护栏 · 混合检索 RAG · 多模态知识库 · MCP · 可观测"]
-    end
-    subgraph BASE["基础设施"]
-        STORE[("PostgreSQL + pgvector · Redis")]
-        LLM["阿里云百炼"]
-    end
-    UI --> API
-    API --> CORE
-    CORE --> OPS
-    OPS --> STORE
-    OPS --> LLM
-```
+![RentAI 架构图](docs/architecture.svg)
 
 **核心设计**：把「可复现的确定性流水线」和「模型自主决策」分开——确定性链路稳定可控、可评测，ReAct 链路体现 Agent 自主性；几百条房源放在共享 `AgentCtx`，工具只返回摘要给模型观察，模型负责决策、确定性函数负责执行。
 
