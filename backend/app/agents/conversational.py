@@ -282,6 +282,7 @@ async def chat_step(uid: str, session_id: str, user_msg: str, history: list | No
         sess["history"].append(("user", user_msg))
         sess["history"].append(("assistant", choice.content))
         await _set(skey, sess, ttl=SESSION_TTL)
+        record_usage(build_usage(prompt_tokens=_pt, completion_tokens=_ct, latency_ms=latency_ms, retry_rounds=0, extra_llm_calls=0))
         return {"kind": "message", "text": choice.content, "session_id": session_id}
 
     # 2) 澄清追问
@@ -291,6 +292,7 @@ async def chat_step(uid: str, session_id: str, user_msg: str, history: list | No
         sess["history"].append(("user", user_msg))
         sess["history"].append(("assistant", q))
         await _set(skey, sess, ttl=SESSION_TTL)
+        record_usage(build_usage(prompt_tokens=_pt, completion_tokens=_ct, latency_ms=latency_ms, retry_rounds=0, extra_llm_calls=0))
         return {"kind": "clarify", "text": q, "session_id": session_id}
 
     # 3) 提交需求并执行——AI 自主选择模式：workflow（确定性管道）或 react（自主决策+反思）
