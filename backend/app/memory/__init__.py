@@ -207,8 +207,15 @@ async def update_profile(user_id: str, patch: dict) -> dict:
             merged = list(dict.fromkeys([*prof.districts, *patch["districts"]]))
             prof.districts = merged[-10:]  # 最多保留10个区域
         if patch.get("budgets"):
-            merged = [*prof.budgets, *patch["budgets"]]
-            prof.budgets = merged[-3:]  # 保留最近3个预算区间
+            # 预算区间去重（转为 tuple 比较，再转回 list）
+            seen = set()
+            merged = []
+            for b in [*prof.budgets, *patch["budgets"]]:
+                key = tuple(b) if isinstance(b, (list, tuple)) else (b,)
+                if key not in seen:
+                    seen.add(key)
+                    merged.append(list(b) if isinstance(b, (list, tuple)) else [b])
+            prof.budgets = merged[-3:]  # 保留最近3个不重复预算区间
         if patch.get("room_types"):
             merged = list(dict.fromkeys([*prof.room_types, *patch["room_types"]]))
             prof.room_types = merged[-5:]
