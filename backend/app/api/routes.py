@@ -226,7 +226,7 @@ async def observe_metrics() -> dict:
     """一次返回观测后台所需指标（确定性匹配/避坑 + Agent 决策 + 对话用量 + 数据规模）。"""
     from evals.run import run_eval
     from evals.eval_agent_decisions import evaluate_agent_decisions
-    from app.observability import snapshot_metrics
+    from app.observability import snapshot_metrics, get_db_metrics
     from app.db.session import SessionLocal
     from sqlalchemy import text as _text
 
@@ -239,10 +239,12 @@ async def observe_metrics() -> dict:
     except Exception:
         pass  # DB 不可用时只返回内存指标，不阻塞观测页
 
+    db_metrics = await get_db_metrics()
     return {
         "metrics": run_eval(),
         "decision": evaluate_agent_decisions(),
         "usage": snapshot_metrics(),
+        "db_usage": db_metrics,
         "data": counts,
     }
 

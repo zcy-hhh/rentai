@@ -85,3 +85,42 @@ def snapshot_metrics() -> dict:
         "avg_latency_ms": round(m["latency_ms"] / turns, 1),
         "note": "进程内存累计，重启归零；生产可换 Redis/TSDB 持久化。",
     }
+
+
+async def get_db_metrics() -> dict:
+    """从 PG messages 表读取持久化观测指标（参考 Dify messages 表的 tokens/latency_ms 字段）。
+
+    与进程内存累计互补：进程内存重启归零，DB 指标永久保存。
+    观测后台可同时展示两者，DB 指标作为权威数据源。
+    """
+    try:
+        from app.db.session import async_session
+        from app.db.models import Message
+        from sqlalchemy import select, func
+
+        async with async_session() as db:
+            result = await db.execute(
+                select(
+                    func.count(Message.id).label("total_messages"),
+                    func.coalesce(func.sum(Message.tokens), 0).label("total_tokens"),
+                    func.coalesce(func.sum(Message.latency_ms), 0).label("total_latency_ms"),
+                    func.count(Message.conversation_id.distinct()).label("active_sessions"),
+                )
+            )
+            row = result.one()
+            total_messages = int(row.total_messages or 0)
+            total_tokens = int(row.total_tokens or 0)
+            total_latency = int(row.total_latency_ms or 0)
+            active_sessions = int(row.active_sessions or 0)
+            assistant_msgs = total_messages // 2  # 粗略估算 assistant 消息数
+            return {
+                "db_total_messages": total_messages,
+                "db_total_tokens": total_tokens,
+                "db_total_latency_ms": total_latency,
+                "db_active_sessions": active_sessions,
+                "db_avg_latency_ms": round(total_latency / max(assistant_msgs, 1), 1),
+                "db_est_cost": estimate_cost(total_tokens // 2, total_tokens // 2),
+                "note": "从 PG messages 表统计，永久保存；与进程内存累计互补。",
+            }
+    except Exception as e:
+        return {"error": str(e), "note": "DB 指标读取失败（表可能未创建），使用进程内存累计。"}

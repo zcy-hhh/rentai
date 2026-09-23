@@ -1,13 +1,17 @@
 # 作者：zcy
-"""对话式 Agent（M12 重构核心）——把 RentAI 从"表单 CRUD"改成自然语言多轮对话。
+"""对话式 Agent——把 RentAI 从"表单 CRUD"改成自然语言多轮对话。
 
-设计（参考主流 Agent 的意图解析 + 澄清 + 记忆，不抄代码）：
+设计（参考 Dify 源码的记忆系统重构，不抄代码）：
 1. **意图解析**：LLM 每轮从"对话历史 + 用户画像 + 当前消息"推断完整租房需求。
-2. **澄清追问**：关键信息不足（连预算/区域都没有）→ 调用 `ask_clarify` 追问一个最关键信息，多轮补齐。
+2. **澄清追问**：关键信息不足 → 调用 ask_clarify 追问一个最关键信息，多轮补齐。
 3. **多轮累积**：会话内信息不断 merge，直到可执行。
-4. **工具编排**：需求齐全 → 调用 `submit_requirement` → 复用 M9 的 ReAct `run_react` 走完整检索/过滤/排序/避坑/清单。
-5. **记忆（持久化）**：短期=会话历史（session_id），长期=用户画像（user_id）；两者都存 **Redis**（带 TTL），
-   Redis 不可用时自动降级进程内存（保证无 Redis 环境可测）。生产可进一步把画像向量化入 pgvector。
+4. **工具编排**：需求齐全 → 调用 submit_requirement → 复用 ReAct 走完整检索/过滤/排序/避坑/清单。
+5. **三层记忆（参考 Dify conversations/messages/user_profiles 表）**：
+   - 工作记忆：进程内存 / LangGraph State，单次请求内有效
+   - 短期记忆：PG conversations + messages 表，session_id 隔离，无 TTL 永久保存，
+     token 反向累计修剪（参考 Dify 从最新消息往前累加 token 超限截断）
+   - 长期记忆：PG user_profiles 表，user_id 隔离，无 TTL，upsert 更新偏好
+   Redis 只做热缓存，PG 是真相源——解决旧版"TTL 1天/7天明天东西就没了"的问题。
 """
 from __future__ import annotations
 
@@ -23,71 +27,21 @@ from app.agents.reflexion import run_with_reflexion, evaluate_viewing
 from app.agents.graph import rent_graph
 from app.models.schemas import RentRequirement
 from app.observability import build_usage, record_usage
-
-# ---- 记忆持久化：短期会话 / 长期画像。Redis 优先，Redis 不可用自动降级进程内存 ----
-SESSION_TTL = 86_400   # 会话 1 天
-PROFILE_TTL = 604_800  # 画像 7 天
-_MEM: dict[str, str] = {}  # 降级用（Redis 不可用时）
-_redis = None
-_redis_fail = False
-
-
-def _redis_conn():
-    """惰性创建 asyncio Redis 连接；失败一次后标记降级，避免每轮重连。"""
-    global _redis, _redis_fail
-    if _redis_fail:
-        return None
-    try:
-        from redis import asyncio as aioredis
-
-        if _redis is None:
-            _redis = aioredis.from_url(settings.redis_url, decode_responses=True)
-        return _redis
-    except Exception:
-        _redis_fail = True
-        return None
-
-
-async def _get(key: str) -> dict:
-    r = _redis_conn()
-    if r:
-        try:
-            raw = await r.get(key)
-            if raw:
-                return json.loads(raw)
-        except Exception:
-            pass
-    if key in _MEM:
-        return json.loads(_MEM[key])
-    return {}
-
-
-async def _set(key: str, val: dict, ttl: int | None = None):
-    r = _redis_conn()
-    if r:
-        try:
-            await r.set(key, json.dumps(val, ensure_ascii=False), ex=ttl)
-            return
-        except Exception:
-            pass
-    _MEM[key] = json.dumps(val, ensure_ascii=False)
-
-
-async def _delete(key: str):
-    r = _redis_conn()
-    if r:
-        try:
-            await r.delete(key)
-            return
-        except Exception:
-            pass
-    _MEM.pop(key, None)
-
+from app.memory import (
+    append_message,
+    get_history,
+    get_or_create_conversation,
+    get_profile,
+    profile_text,
+    save_agent_thought,
+    trim_history,
+    update_profile,
+)
 
 _INTENT_SYSTEM = (
     "你是智能租房助手 RentAI 的意图理解模块。根据用户的自然语言消息（结合历史对话与用户画像），决定下一步：\n"
     "- 若信息足以构成一条可执行的租房需求 → 调用 `submit_requirement`，填入你能确定的所有字段；不确定的字段省略，绝不编造用户没说的约束。\n"
-    "- 若连“预算”和“区域”这些关键检索条件都缺失 → 调用 `ask_clarify`，追问**最关键的 1 个**信息（如预算、区域），一次只问一个。\n"
+    "- 若连「预算」和「区域」这些关键检索条件都缺失 → 调用 `ask_clarify`，追问**最关键的 1 个**信息（如预算、区域），一次只问一个。\n"
     "- 若用户在闲聊/问功能 → 直接自然语言回复，不调用工具。\n"
     "模式选择（submit_requirement 的 mode 字段）：需求简单明确（有清晰区域/预算/户型，如'滨湖3000以内1室'）→ mode='workflow'，走确定性管道快速稳定返回；需求复杂/模糊/需要多工具灵活组合（如'帮我找性价比高的、通勤方便的'）→ mode='react'，走自主决策。默认 react。\n"
     "宁可先 ask_clarify 补全，也不要编造需求。所有结论严格来自用户消息与已知画像。\n"
@@ -133,41 +87,19 @@ _INTENT_TOOLS = [
 ]
 
 
-def _profile_text(p: dict) -> str:
-    """把用户画像 dict 渲染成注入意图 System Prompt 的一段文字。"""
-    if not p:
-        return "（新用户，暂无画像）"
-    parts = []
-    if p.get("districts"):
-        parts.append("常用区域：" + "、".join(p["districts"]))
-    if p.get("budgets"):
-        parts.append("常用预算区间：" + "、".join(f"{a}-{b}元" for a, b in p["budgets"][-3:]))
-    if p.get("room_types"):
-        parts.append("常用户型：" + "、".join(p["room_types"]))
-    if p.get("tags"):
-        parts.append("偏好：" + "、".join(p["tags"]))
-    return "；".join(parts) if parts else "（画像正在积累）"
-
-
-def _update_profile(p: dict, req: RentRequirement):
-    """把一次已执行的需求并入用户画像（长期记忆）。"""
-    p.setdefault("districts", [])
-    p.setdefault("budgets", [])
-    p.setdefault("room_types", [])
-    p.setdefault("tags", [])
-    if req.district and req.district not in p["districts"]:
-        p["districts"].append(req.district)
+def _update_profile_from_req(p: dict, req: RentRequirement) -> dict:
+    """把一次已执行的需求并入用户画像（长期记忆）。返回需要 update 的 patch。"""
+    patch = {}
+    if req.district:
+        patch["districts"] = [req.district]
     if req.max_price:
-        # 简化：按 1000 档位粗存
         lo = (int(req.max_price) // 1000) * 1000
-        pair = (lo - 1000, lo)
-        p["budgets"].append(pair)
-    for rt in req.room_types:
-        if rt and rt not in p["room_types"]:
-            p["room_types"].append(rt)
-    for t in req.tags:
-        if t and t not in p["tags"]:
-            p["tags"].append(t)
+        patch["budgets"] = [(lo - 1000, lo)]
+    if req.room_types:
+        patch["room_types"] = list(req.room_types)
+    if req.tags:
+        patch["tags"] = list(req.tags)
+    return patch
 
 
 def _build_requirement(args: dict) -> RentRequirement:
@@ -193,8 +125,7 @@ def _parse_args(raw: str | None) -> dict:
             return json.loads(attempt)
         except json.JSONDecodeError:
             pass
-    # 宽松修复：中文引号转英文、去多余尾逗号、截取到第一个完整对象
-    fixed = raw.replace("“", '"').replace("”", '"').replace("‘", "'").replace("’", "'")
+    fixed = raw.replace(""", '"').replace(""", '"').replace("'", "'").replace("'", "'")
     fixed = re.sub(r",\s*([}\]])", r"\1", fixed)
     for cand in (fixed,):
         try:
@@ -237,27 +168,30 @@ def _result_summary(req: RentRequirement, viewing, escalated: bool = False) -> s
 async def chat_step(uid: str, session_id: str, user_msg: str, history: list | None = None) -> dict:
     """对话式 Agent 单轮推进。返回给前端的一步结果。
 
-    history：前端携带的完整对话历史 [(role, content), ...]，作为上下文**真相源**——
-    即使 Redis 会话记忆过期/降级丢失，后端也能基于前端历史继续多轮（避免"新增需求重复生成"）。
-    缺省时回退 Redis 会话记忆。
+    记忆重构（参考 Dify）：
+    - 短期记忆从 PG messages 表读（带 token 反向累计修剪），前端 history 作为真相源兜底
+    - 长期记忆从 PG user_profiles 表读，无 TTL
+    - 每轮结束后消息持久化到 PG messages 表
     """
     if not is_configured():
         return {"kind": "message", "text": "未配置 DASHSCOPE_API_KEY，无法进行对话式检索。"}
 
-    skey = f"rentai:session:{session_id}"
-    pkey = f"rentai:profile:{uid}"
-    sess = await _get(skey)
-    sess.setdefault("history", [])
-    prof = await _get(pkey)
+    # 确保会话存在（PG 持久化，无 TTL）
+    await get_or_create_conversation(session_id, uid)
 
-    # 上下文真相源：前端历史优先（覆盖 Redis 过期/降级缺失），并同步写回 Redis 供跨设备兜底
-    ctx_hist = history if history is not None else sess["history"]
+    # 短期记忆：优先用前端携带的 history（真相源），否则从 PG 读并做 token 修剪
     if history is not None:
-        sess["history"] = list(ctx_hist)
+        ctx_hist = [{"role": r, "content": c} for r, c in history]
+        ctx_hist = trim_history(ctx_hist)
+    else:
+        ctx_hist = await get_history(session_id)
+
+    # 长期记忆：从 PG user_profiles 读（无 TTL，永久保存）
+    prof = await get_profile(uid)
 
     messages = [
-        {"role": "system", "content": _INTENT_SYSTEM + "\n用户画像：" + _profile_text(prof)},
-        *[{"role": r, "content": c} for r, c in ctx_hist],
+        {"role": "system", "content": _INTENT_SYSTEM + "\n用户画像：" + profile_text(prof)},
+        *ctx_hist,
         {"role": "user", "content": user_msg},
     ]
 
@@ -271,27 +205,25 @@ async def chat_step(uid: str, session_id: str, user_msg: str, history: list | No
         temperature=0.2,
         max_tokens=800,
     )
-    latency_ms = int((time.perf_counter() - _t0) * 1000)  # 可观测性：端到端延迟
+    latency_ms = int((time.perf_counter() - _t0) * 1000)
     _u = resp.usage
     _pt = int(getattr(_u, "prompt_tokens", 0) or 0)
     _ct = int(getattr(_u, "completion_tokens", 0) or 0)
     choice = resp.choices[0].message
 
-    # 1) 模型直接回复（闲聊/说明）
+    # 1) 模型直接回复（闲聊/说明）—— 持久化到 PG messages 表
     if not choice.tool_calls and choice.content:
-        sess["history"].append(("user", user_msg))
-        sess["history"].append(("assistant", choice.content))
-        await _set(skey, sess, ttl=SESSION_TTL)
+        await append_message(session_id, "user", user_msg, latency_ms=0)
+        await append_message(session_id, "assistant", choice.content, tokens=_ct, latency_ms=latency_ms)
         record_usage(build_usage(prompt_tokens=_pt, completion_tokens=_ct, latency_ms=latency_ms, retry_rounds=0, extra_llm_calls=0))
         return {"kind": "message", "text": choice.content, "session_id": session_id}
 
-    # 2) 澄清追问
+    # 2) 澄清追问 —— 持久化到 PG messages 表
     if choice.tool_calls and choice.tool_calls[0].function.name == "ask_clarify":
         args = _parse_args(choice.tool_calls[0].function.arguments)
         q = args.get("question") or "请补充预算或区域等信息，我好帮你找房。"
-        sess["history"].append(("user", user_msg))
-        sess["history"].append(("assistant", q))
-        await _set(skey, sess, ttl=SESSION_TTL)
+        await append_message(session_id, "user", user_msg, latency_ms=0)
+        await append_message(session_id, "assistant", q, tokens=_ct, latency_ms=latency_ms)
         record_usage(build_usage(prompt_tokens=_pt, completion_tokens=_ct, latency_ms=latency_ms, retry_rounds=0, extra_llm_calls=0))
         return {"kind": "clarify", "text": q, "session_id": session_id}
 
@@ -301,25 +233,39 @@ async def chat_step(uid: str, session_id: str, user_msg: str, history: list | No
         req = _build_requirement(args)
         mode = args.get("mode", "react")
         if mode == "workflow":
-            # 确定性管道：LangGraph 固定五节点，快速稳定，适合需求明确的场景
             state = await rent_graph.ainvoke({"requirement": req})
             viewing = state.get("viewing_list")
             trace = [{"tool": t, "thought": ""} for t in ["retrieve", "filter", "rank", "risk_check", "build_list"]]
             reflexion = []
         else:
-            # 自主决策：ReAct + 反思自纠错，适合复杂/模糊需求
             trace, viewing, reflexion = await run_with_reflexion(req)
-        _update_profile(prof, req)  # 把本次需求并入长期画像
+
+        # 长期记忆：把本次需求并入 PG user_profiles（upsert，无 TTL）
+        patch = _update_profile_from_req({}, req)
+        await update_profile(uid, patch)
+
         issues = evaluate_viewing(req, viewing)
         escalated = bool(reflexion and issues)
-        # 把"执行摘要"而非占位文本存进 history，后续轮次模型可见上次结果，做增量而非重复
-        sess["history"].append(("user", user_msg))
-        sess["history"].append(("assistant", _result_summary(req, viewing, escalated=escalated)))
-        await _set(pkey, prof, ttl=PROFILE_TTL)
-        await _set(skey, sess, ttl=SESSION_TTL)
+
+        # 短期记忆：把"执行摘要"存入 PG messages 表（后续轮次可见上次结果，做增量）
+        summary = _result_summary(req, viewing, escalated=escalated)
+        await append_message(session_id, "user", user_msg, latency_ms=0)
+        assistant_msg = await append_message(session_id, "assistant", summary, tokens=_ct, latency_ms=latency_ms)
+
+        # Agent 思考过程持久化（参考 Dify message_agent_thoughts 表）：每步 thought/tool/tool_input 存库
+        for pos, step in enumerate(trace):
+            await save_agent_thought(
+                message_id=assistant_msg.id,
+                position=pos,
+                thought=step.get("thought", ""),
+                tool=step.get("tool", ""),
+                tool_input=step.get("args", step.get("tool_input", {})),
+                observation=step.get("observation", ""),
+            )
+
         usage = build_usage(prompt_tokens=_pt, completion_tokens=_ct, latency_ms=latency_ms, retry_rounds=len(reflexion), extra_llm_calls=1)
-        record_usage(usage)  # 累计进观测指标（供观测后台快照）
-        if escalated:  # 人工兜底升级（能力地图红区缺失项）：反思多次仍未达标 → 升级人工坐席
+        record_usage(usage)
+        if escalated:
             return {
                 "kind": "escalate",
                 "session_id": session_id,
@@ -338,7 +284,7 @@ async def chat_step(uid: str, session_id: str, user_msg: str, history: list | No
             "session_id": session_id,
             "requirement": req.model_dump(),
             "trace": trace,
-            "reflexion": reflexion,  # 反思日志（若评估不通过则为非空列表）
+            "reflexion": reflexion,
             "viewing": _to_dict_list(viewing) if viewing else None,
             "usage": usage,
         }
@@ -348,17 +294,16 @@ async def chat_step(uid: str, session_id: str, user_msg: str, history: list | No
 
 
 async def reset_session(session_id: str):
-    """清除某个会话的记忆（Redis + 内存降级）。"""
-    await _delete(f"rentai:session:{session_id}")
+    """软删除会话（参考 Dify is_deleted，不物理删除）。"""
+    from app.memory import delete_conversation
+    await delete_conversation(session_id)
 
 
 async def record_user_preference(uid: str, req: RentRequirement):
-    """用户确认/调整看房清单后，把需求并入长期画像（后续 Agent 找房会参考）。
+    """用户确认/调整看房清单后，把需求并入长期画像（PG user_profiles，无 TTL）。
 
     作用：让"确认/调整"有实际业务含义——用户明确认可或调整过的需求，
     会被 Agent 记住并用于后续推荐，而不是确认后清单就废弃。
     """
-    pkey = f"rentai:profile:{uid}"
-    prof = await _get(pkey)
-    _update_profile(prof, req)
-    await _set(pkey, prof, ttl=PROFILE_TTL)
+    patch = _update_profile_from_req({}, req)
+    await update_profile(uid, patch)
