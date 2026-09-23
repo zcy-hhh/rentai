@@ -2,6 +2,7 @@
 // 与后端 app/models/schemas.py 对齐的 API 类型
 import type {
   AgentToolCall,
+  CandidateListing,
   ChatStepResult,
   LoginRequest,
   LoginResponse,
@@ -77,6 +78,20 @@ export async function apiConfirm(
 export async function apiGetViewing(listId: string): Promise<ViewingList> {
   const res = await fetch(`${BASE}/rent/viewing/${listId}`);
   if (!res.ok) throw new Error("看房清单不存在");
+  return res.json();
+}
+
+// 保存对话结果为看房清单（用户主动点击，持久化到 PostgreSQL）
+export async function apiSaveViewing(
+  requirement: RentRequirement,
+  candidates: CandidateListing[],
+): Promise<ViewingList> {
+  const res = await fetch(`${BASE}/rent/viewing/save`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ requirement, candidates }),
+  });
+  if (!res.ok) throw new Error("保存看房清单失败");
   return res.json();
 }
 

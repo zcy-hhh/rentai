@@ -1,6 +1,6 @@
 // 作者：zcy
 import { useEffect, useRef, useState } from "react";
-import { apiChat } from "../api";
+import { apiChat, apiSaveViewing } from "../api";
 import { AGENT_TOOL_LABELS, type CandidateListing, type ChatStepResult } from "../types";
 
 interface Msg {
@@ -122,6 +122,7 @@ export default function Chat() {
   });
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [savedIds, setSavedIds] = useState<Record<number, string>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -163,6 +164,19 @@ export default function Chat() {
     const s = `chat-${Date.now()}`;
     setMsgs([]);
     setSessionId(s); // 触发持久化 effect：新 session 写入空会话
+  }
+
+  async function handleSave(idx: number) {
+    const m = msgs[idx];
+    const cands = m?.result?.viewing?.candidates ?? [];
+    if (!m?.result?.requirement || !cands.length) return;
+    try {
+      const vl = await apiSaveViewing(m.result.requirement, cands);
+      setSavedIds((s) => ({ ...s, [idx]: vl.list_id }));
+      localStorage.setItem("rentai:last_viewing", JSON.stringify({ list_id: vl.list_id }));
+    } catch (e) {
+      alert("保存失败：" + (e as Error).message);
+    }
   }
 
   return (
@@ -215,10 +229,29 @@ export default function Chat() {
                     </div>
                   )}
                   {(m.result.viewing?.candidates ?? []).length ? (
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      {m.result.viewing!.candidates.map((c) => (
-                        <ResultCard key={c.id} c={c} />
-                      ))}
+                    <div>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {m.result.viewing!.candidates.map((c) => (
+                          <ResultCard key={c.id} c={c} />
+                        ))}
+                      </div>
+                      <div className="mt-3 flex items-center gap-2">
+                        {savedIds[i] ? (
+                          <a
+                            href={`/viewing?id=${savedIds[i]}`}
+                            className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 border border-emerald-200 hover:bg-emerald-100"
+                          >
+                            ✓ 已保存为看房清单 · 查看 →
+                          </a>
+                        ) : (
+                          <button
+                            onClick={() => handleSave(i)}
+                            className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
+                          >
+                            保存为看房清单
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ) : (
                     <div className="text-xs text-slate-500">未找到合适房源，试试补充区域或预算。</div>

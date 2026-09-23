@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from app.agents.graph import rent_graph
 from app.core.harness import (
@@ -18,7 +20,7 @@ from app.core.harness import (
     guard_requirement,
     safe_stream,
 )
-from app.models.schemas import ChatRequest, ConfirmRequest, RentRequirement, RentResponse, ViewingList
+from app.models.schemas import CandidateListing, ChatRequest, ConfirmRequest, RentRequirement, RentResponse, ViewingList
 from app.services.viewing import pg_viewing_store
 
 # Pydantic model -> JSON 可序列化结构（避免 default=str 把对象降级成 repr 字符串）
@@ -110,6 +112,28 @@ async def agent_search_stream(req: RentRequirement) -> StreamingResponse:
             yield f"event: error\ndata: {data}\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+class SaveViewingRequest(BaseModel):
+    """对话结果保存为看房清单：用户主动点击，而非 Agent 自动生成。"""
+    requirement: RentRequirement
+    candidates: list[CandidateListing]
+    verify_items: list[str] = []
+    ask_items: list[str] = []
+
+
+@router.post("/viewing/save", response_model=ViewingList, summary="保存对话结果为看房清单")
+async def save_viewing(body: SaveViewingRequest) -> ViewingList:
+    """用户在对话结果里主动点击"保存为看房清单"，把当前推荐房源持久化到 PostgreSQL。"""
+    vl = ViewingList(
+        list_id=uuid.uuid4().hex[:12],
+        requirement=body.requirement,
+        candidates=body.candidates,
+        verify_items=body.verify_items,
+        ask_items=body.ask_items,
+        status="pending",
+    )
+    return await pg_viewing_store.save(vl, user_id="demo")
 
 
 @router.post("/viewing-list", response_model=ViewingList, summary="生成看房清单（人工确认）")
