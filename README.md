@@ -19,13 +19,14 @@
 
 ## ✨ 特性
 
-- **🗣️ 对话式 Agent**：多轮自然语言意图解析 → 澄清 → 执行；短期会话记忆 + 长期用户画像持久化，跨刷新可续
-- **🤖 ReAct 自主决策**：模型通过 function calling 自主决定调用哪些工具、顺序与步数，并反思自纠错；确定性管道作可复现的兜底与基准对照
-- **🛡️ Harness 治理层**：输入越界护栏、死循环护栏、候选截断防上下文膨胀、引用约束防幻觉
+- **🗣️ 单一对话主页面**：所有操作收敛到一个自然语言对话框——AI 自主判断是闲聊、澄清追问还是执行找房，无需用户在多个页面间切换
+- **🤖 AI 自主模式路由**：模型通过 function calling 自主选择执行模式——需求明确走确定性管道（快速稳定），需求复杂走 ReAct 自主决策（灵活+反思自纠错）
+- **🧠 多轮记忆持久化**：短期会话历史 + 长期用户画像，Redis 持久化带 TTL；前端历史为上下文真相源，新增需求做增量执行而非重复生成
+- **📋 看房清单主动生成**：对话返回候选房源后，用户一键「保存为看房清单」，PG 持久化，支持确认/调整闭环，确认结果并入用户画像
+- **🛡️ Harness 治理层**：输入越界护栏、死循环护栏、候选截断防上下文膨胀、引用约束防幻觉、人工兜底升级
 - **🔍 混合检索 RAG + pgvector**：关键词 ∪ 语义召回 → gte-rerank 重排；多平台房源可插拔
 - **📚 多模态文档知识库**：上传 PDF / PPT / Excel 解析入库，检索带来源/页码引用
-- **✅ 看房清单 HITL**：人工确认 / 调整闭环，PG 持久化，确认结果并入用户画像，让每个动作有业务含义
-- **📊 评测体系 + 观测后台**：确定性匹配指标 + Agent 决策质量 + Ragas 语义指标；独立观测台页面实时看对话用量与数据基线
+- **📊 评测体系 + 观测后台**：确定性匹配指标 + Agent 决策质量 + Ragas 语义指标；独立观测台实时看对话用量与数据基线，8 秒自动刷新
 - **🔐 企业级工程**：JWT + RBAC + 多租户隔离、MCP 工具暴露、SSE 流式、Docker Compose 一键部署
 
 ---
@@ -34,7 +35,7 @@
 
 ![RentAI 架构图](docs/architecture.svg)
 
-**核心设计**：把「可复现的确定性流水线」和「模型自主决策」分开——确定性链路稳定可控、可评测，ReAct 链路体现 Agent 自主性；几百条房源放在共享 `AgentCtx`，工具只返回摘要给模型观察，模型负责决策、确定性函数负责执行。
+**核心设计**：所有交互收敛到单一对话主页面——AI 每轮做意图解析，自主决定是闲聊回复、澄清追问还是执行找房；执行时模型自主选择「确定性管道」（LangGraph 五节点，快速稳定可复现）或「ReAct 自主决策」（function calling 灵活组合工具 + 反思自纠错）。候选房源放在共享上下文，工具只返回摘要给模型观察，模型负责决策、确定性函数负责执行。
 
 ---
 
@@ -121,20 +122,26 @@ curl "http://localhost:8000/api/rent/observe/ragas?limit=3"   # 语义评测
 rentai/
 ├─ backend/
 │  ├─ app/
-│  │  ├─ api/            # REST/SSE 路由 + JWT/RBAC
-│  │  ├─ agents/         # LangGraph 管道 / ReAct / 对话式 / 反思
+│  │  ├─ api/            # REST/SSE 路由 + JWT/RBAC + 看房清单保存端点
+│  │  ├─ agents/         # 对话式Agent(意图解析+模式路由) / LangGraph管道 / ReAct / 反思
 │  │  ├─ rag/            # 混合检索 + pgvector
-│  │  ├─ doc_knowledge/  # 多模态文档知识库
-│  │  ├─ tools/          # 数据源 / 通勤 / ReAct 工具 / MCP
+│  │  ├─ doc_knowledge/  # 多模态文档知识库(PDF/PPT/Excel)
+│  │  ├─ tools/          # 数据源 / 通勤 / ReAct工具 / MCP
 │  │  ├─ llm/            # 百炼网关 / embedding / rerank
-│  │  ├─ core/           # 配置 / Harness 护栏 / 鉴权
-│  │  ├─ services/       # 看房清单持久化
-│  │  └─ observability.py
-│  ├─ evals/             # 评测脚本
-│  └─ alembic/           # 迁移
-├─ frontend/src/         # React 页面 + 组件 + 状态 + api 封装
-├─ docs/                 # 部署文档
-└─ docker-compose.yml    # postgres + redis + backend 一键部署
+│  │  ├─ core/           # 配置 / Harness护栏 / 鉴权
+│  │  ├─ services/       # 看房清单持久化 + HITL
+│  │  └─ observability.py # 请求级指标收集(对话轮次/token/延迟/成本)
+│  ├─ evals/             # 评测脚本(确定性+Agent决策+Ragas)
+│  └─ alembic/           # 数据库迁移
+├─ frontend/src/
+│  ├─ pages/             # Chat(单一主页面) / Viewing / Knowledge / Observe
+│  ├─ components/        # Layout / 候选房源卡片 / 保存清单按钮
+│  ├─ store/             # Zustand 状态管理
+│  └─ api.ts             # 后端API封装
+├─ docs/
+│  ├─ architecture.svg   # 架构图(分层卡片式)
+│  └─ 部署文档.md         # Docker Compose 部署指南
+└─ docker-compose.yml    # postgres(pgvector) + redis + backend 一键部署
 ```
 
 ---
