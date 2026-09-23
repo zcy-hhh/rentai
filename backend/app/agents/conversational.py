@@ -20,6 +20,7 @@ from app.llm import client as llm
 from app.core.config import settings
 from app.agents.react_agent import run_react
 from app.agents.reflexion import run_with_reflexion, evaluate_viewing
+from app.agents.graph import rent_graph
 from app.models.schemas import RentRequirement
 from app.observability import build_usage, record_usage
 
@@ -88,6 +89,7 @@ _INTENT_SYSTEM = (
     "- 若信息足以构成一条可执行的租房需求 → 调用 `submit_requirement`，填入你能确定的所有字段；不确定的字段省略，绝不编造用户没说的约束。\n"
     "- 若连“预算”和“区域”这些关键检索条件都缺失 → 调用 `ask_clarify`，追问**最关键的 1 个**信息（如预算、区域），一次只问一个。\n"
     "- 若用户在闲聊/问功能 → 直接自然语言回复，不调用工具。\n"
+    "模式选择（submit_requirement 的 mode 字段）：需求简单明确（有清晰区域/预算/户型，如'滨湖3000以内1室'）→ mode='workflow'，走确定性管道快速稳定返回；需求复杂/模糊/需要多工具灵活组合（如'帮我找性价比高的、通勤方便的'）→ mode='react'，走自主决策。默认 react。\n"
     "宁可先 ask_clarify 补全，也不要编造需求。所有结论严格来自用户消息与已知画像。\n"
     "增量原则：若历史中已有执行结果，用户新增/修改条件时应**在该基础上增量执行**（结合上次需求调整），"
     "不要重复生成与上次完全相同的旧需求；确属全新需求才正常执行。"
@@ -110,6 +112,7 @@ _INTENT_TOOLS = [
                     "commute_to": {"type": "string", "description": "通勤目的地"},
                     "commute_max_minutes": {"type": "number", "description": "通勤时间上限（分钟）"},
                     "user_note": {"type": "string", "description": "用户补充的自由指令（如 只要最便宜的3套、不用查风险）"},
+                    "mode": {"type": "string", "enum": ["workflow", "react"], "description": "执行模式：workflow=确定性管道（快速稳定，适合明确需求）；react=自主决策（适合复杂/模糊需求）。默认 react"},
                 },
                 "required": [],
             },
@@ -290,11 +293,20 @@ async def chat_step(uid: str, session_id: str, user_msg: str, history: list | No
         await _set(skey, sess, ttl=SESSION_TTL)
         return {"kind": "clarify", "text": q, "session_id": session_id}
 
-    # 3) 提交需求并执行 ReAct（带反思-自纠错回路）
+    # 3) 提交需求并执行——AI 自主选择模式：workflow（确定性管道）或 react（自主决策+反思）
     if choice.tool_calls and choice.tool_calls[0].function.name == "submit_requirement":
         args = _parse_args(choice.tool_calls[0].function.arguments)
         req = _build_requirement(args)
-        trace, viewing, reflexion = await run_with_reflexion(req)
+        mode = args.get("mode", "react")
+        if mode == "workflow":
+            # 确定性管道：LangGraph 固定五节点，快速稳定，适合需求明确的场景
+            state = await rent_graph.ainvoke({"requirement": req})
+            viewing = state.get("viewing_list")
+            trace = [{"tool": t, "thought": ""} for t in ["retrieve", "filter", "rank", "risk_check", "build_list"]]
+            reflexion = []
+        else:
+            # 自主决策：ReAct + 反思自纠错，适合复杂/模糊需求
+            trace, viewing, reflexion = await run_with_reflexion(req)
         _update_profile(prof, req)  # 把本次需求并入长期画像
         issues = evaluate_viewing(req, viewing)
         escalated = bool(reflexion and issues)

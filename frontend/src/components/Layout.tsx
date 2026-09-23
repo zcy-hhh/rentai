@@ -25,10 +25,7 @@ export default function Layout() {
             <span className="font-bold text-brand-600 text-lg">RentAI</span>
             <nav className="flex items-center gap-1">
               <NavLink to="/" className={navClass} end>
-                智能搜索
-              </NavLink>
-              <NavLink to="/chat" className={navClass}>
-                对话式 Agent
+                智能助手
               </NavLink>
               <NavLink to="/viewing" className={navClass}>
                 看房清单
