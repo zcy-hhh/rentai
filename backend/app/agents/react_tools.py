@@ -62,7 +62,7 @@ async def search_listings() -> str:
 
 @tool
 def filter_hard() -> str:
-    """硬条件过滤：从已检索候选里筛掉不符合价格上限/最小面积/户型的房源。"""
+    """硬条件过滤：从已检索候选里筛掉不符合价格上限/最小面积/户型/偏好标签的房源。"""
     req = _ctx.req
     assert req is not None
     kept = []
@@ -73,9 +73,12 @@ def filter_hard() -> str:
             continue
         if req.room_types and not any(rt in l.room_type for rt in req.room_types):
             continue
+        # 偏好标签过滤：用户指定的标签必须全部命中（如 近地铁、精装、电梯）
+        if req.tags and not all(t in l.facilities for t in req.tags):
+            continue
         kept.append(l)
     _ctx.filtered = kept
-    return _summary("硬条件过滤后（满足价格/面积/户型）", kept)
+    return _summary("硬条件过滤后（满足价格/面积/户型/标签）", kept)
 
 
 @tool

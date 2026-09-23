@@ -29,7 +29,7 @@ def node_retrieve(state: dict) -> dict:
 # ---------- 硬条件过滤 ----------
 
 def node_filter(state: dict) -> dict:
-    """硬条件过滤：价格上限、最小面积、可接受户型。"""
+    """硬条件过滤：价格上限、最小面积、可接受户型、偏好标签（近地铁/精装等）。"""
     req: RentRequirement = state["requirement"]
     filtered: list[Listing] = []
     for listing in state["raw"]:
@@ -38,6 +38,9 @@ def node_filter(state: dict) -> dict:
         if req.min_area is not None and listing.area < req.min_area:
             continue
         if req.room_types and not any(rt in listing.room_type for rt in req.room_types):
+            continue
+        # 偏好标签过滤：用户指定的标签必须全部命中（如 近地铁、精装、电梯）
+        if req.tags and not all(t in listing.facilities for t in req.tags):
             continue
         filtered.append(listing)
     return {"filtered": filtered}
