@@ -33,50 +33,24 @@
 ## 🏗️ 架构总览
 
 ```mermaid
-flowchart LR
-    subgraph FE["React 前端 (Vite + TS)"]
-        UI["搜索 / 对话 / 看房清单 / 知识库 / 观测台"]
+flowchart TB
+    subgraph FE["React 前端"]
+        UI["智能搜索 · 对话 · 看房清单 · 知识库 · 观测台"]
     end
-
     subgraph BE["FastAPI 后端"]
-        API["REST + SSE 路由层"]
-        AG["LangGraph 确定性管道"]
-        RC["ReAct 自主调工具"]
-        HR["自研 Harness 护栏"]
-        RAG["混合检索 RAG"]
-        DOC["多模态文档知识库"]
-        OBS["可观测收集器"]
-        MCP["MCP 服务 (stdio)"]
+        API["REST + SSE"]
+        CORE["Agent 编排（LangGraph 管道 + ReAct）"]
+        OPS["Harness 护栏 · 混合检索 RAG · 多模态知识库 · MCP · 可观测"]
     end
-
-    subgraph STORE["存储"]
-        PG[("PostgreSQL + pgvector")]
-        RD[("Redis")]
+    subgraph BASE["基础设施"]
+        STORE[("PostgreSQL + pgvector · Redis")]
+        LLM["阿里云百炼（qwen · embedding · rerank）"]
     end
-
-    subgraph LLM["阿里云百炼"]
-        QW["qwen-plus"]
-        EMB["text-embedding-v4"]
-        RANK["gte-rerank"]
-    end
-
-    UI -->|REST/SSE| API
-    API --> AG
-    API --> RC
-    AG --> HR
-    RC --> HR
-    RC --> RAG
-    AG --> RAG
-    RAG --> DOC
-    AG --> OBS
-    MCP --> RAG
-    RAG --> PG
-    DOC --> PG
-    AG --> RD
-    API -.-> LLM
-    RAG -.-> EMB
-    RC -.-> QW
-    RAG -.-> RANK
+    UI --> API
+    API --> CORE
+    CORE --> OPS
+    OPS --> STORE
+    OPS --> LLM
 ```
 
 **核心设计**：把「可复现的确定性流水线」和「模型自主决策」分开（双轨）——确定性链路稳定可控、可评测，ReAct 链路体现 Agent 自主性；几百条房源放在共享 `AgentCtx`，工具只返回摘要给模型观察，模型负责决策、确定性函数负责执行（省 token）。
@@ -186,7 +160,7 @@ rentai/
 
 ## 📚 文档
 
-- [`docs/开发文档.md`](docs/开发文档.md)：需求分析 → 技术选型 → 后端工程化（9 模块）→ 前端工程化 → 评测与验证基线，全部可溯源
+- [`docs/部署文档.md`](docs/部署文档.md)：Docker Compose 一键部署、密钥配置、常用命令与 FAQ
 
 ---
 
